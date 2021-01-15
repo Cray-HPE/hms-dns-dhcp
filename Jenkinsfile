@@ -1,6 +1,7 @@
 @Library('dst-shared@master') _
 
 dockerBuildPipeline {
+        githubPushRepo = "Cray-HPE/hms-dns-dhcp"
         repository = "cray"
         imagePrefix = "hms"
         app = "dns-dhcp"
