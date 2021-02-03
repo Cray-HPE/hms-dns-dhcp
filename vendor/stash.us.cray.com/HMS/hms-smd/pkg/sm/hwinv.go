@@ -1,17 +1,32 @@
-// Copyright 2018-2020 Cray Inc. All Rights Reserved.
+// MIT License
 //
-// Except as permitted by contract or express written permission of Cray Inc.,
-// no part of this work or its content may be modified, used, reproduced or
-// disclosed in any form. Modifications made without express permission of
-// Cray Inc. may damage the system the software is installed within, may
-// disqualify the user from receiving support from Cray Inc. under support or
-// maintenance contracts, or require additional support services outside the
-// scope of those contracts to repair the software or system.
+// (C) Copyright [2018-2021] Hewlett Packard Enterprise Development LP
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+// OTHER DEALINGS IN THE SOFTWARE.
 
 package sm
 
 import (
 	"encoding/json"
+	"regexp"
+	"strconv"
+
 	base "stash.us.cray.com/HMS/hms-base"
 	rf "stash.us.cray.com/HMS/hms-smd/pkg/redfish"
 )
@@ -20,6 +35,9 @@ var ErrHWLocInvalid = base.NewHMSError("sm", "ID is empty or not a valid xname")
 var ErrHWFRUIDInvalid = base.NewHMSError("sm", "FRUID is empty or invalid")
 var ErrHWInvFmtInvalid = base.NewHMSError("sm", "Invalid HW Inventory format")
 var ErrHWInvFmtNI = base.NewHMSError("sm", "HW Inv format not yet implemented")
+var ErrHWInvMissingFRU = base.NewHMSError("sm", "PopulatedFRU must be populated")
+var ErrHWInvMissingFRUInfo = base.NewHMSError("sm", "FRU info is empty")
+var ErrHWInvMissingLoc = base.NewHMSError("sm", "Component location info is empty")
 
 // Note most of these structures are polymorphic in the sense that they
 // are stored generically in the database largely as raw json.  The non
@@ -55,8 +73,13 @@ type hmsTypeArrays struct {
 	Memory     *[]*HWInvByLoc `json:"Memory,omitempty"`
 	Drives     *[]*HWInvByLoc `json:"Drives,omitempty"`
 
-	CabinetPDUs       *[]*HWInvByLoc `json:"CabinetPDUs,omitempty"`
-	CabinetPDUOutlets *[]*HWInvByLoc `json:"CabinetPDUOutlets,omitempty"`
+	CabinetPDUs                *[]*HWInvByLoc `json:"CabinetPDUs,omitempty"`
+	CabinetPDUOutlets          *[]*HWInvByLoc `json:"CabinetPDUPowerConnectors,omitempty"`
+	CMMRectifiers              *[]*HWInvByLoc `json:"CMMRectifiers,omitempty"`
+	NodeAccels                 *[]*HWInvByLoc `json:"NodeAccels,omitempty"`
+	NodeAccelRisers            *[]*HWInvByLoc `json:"NodeAccelRisers,omitempty"`
+	NodeEnclosurePowerSupplies *[]*HWInvByLoc `json:"NodeEnclosurePowerSupplies,omitempty"`
+	NodeHsnNICs                *[]*HWInvByLoc `json:"NodeHsnNics,omitempty"`
 
 	// These don't have hardware inventory location/FRU info yet,
 	// either because they aren't known yet or because they are manager
@@ -66,9 +89,7 @@ type hmsTypeArrays struct {
 	CECs           *[]*HWInvByLoc `json:"CECs,omitempty"`
 	CDUs           *[]*HWInvByLoc `json:"CDUs,omitempty"`
 	CabinetCDUs    *[]*HWInvByLoc `json:"CabinetCDUs,omitempty"`
-	CMMRectifiers  *[]*HWInvByLoc `json:"CMMRectifiers,omitempty"`
 	CMMFpgas       *[]*HWInvByLoc `json:"CMMFpgas,omitempty"`
-	NodeAccels     *[]*HWInvByLoc `json:"NodeAccels,omitempty"`
 	NodeFpgas      *[]*HWInvByLoc `json:"NodeFpgas,omitempty"`
 	RouterFpgas    *[]*HWInvByLoc `json:"RouterFpgas,omitempty"`
 	RouterTORFpgas *[]*HWInvByLoc `json:"RouterTORFpgas,omitempty"`
@@ -80,13 +101,11 @@ type hmsTypeArrays struct {
 	NodeBMCs              *[]*HWInvByLoc `json:"NodeBMCs,omitempty"`
 	RouterBMCs            *[]*HWInvByLoc `json:"RouterBMCs,omitempty"`
 
-	CabinetPDUNics             *[]*HWInvByLoc `json:"CabinetPDUNics,omitempty"`
-	NodeEnclosurePowerSupplies *[]*HWInvByLoc `json:"NodeEnclosurePowerSupplies,omitempty"`
-	NodePowerConnectors        *[]*HWInvByLoc `json:"NodePowerConnectors,omitempty"`
-	NodeBMCNics                *[]*HWInvByLoc `json:"NodeBMCNics,omitempty"`
-	NodeNICs                   *[]*HWInvByLoc `json:"NodeNICs,omitempty"`
-	NodeHsnNICs                *[]*HWInvByLoc `json:"NodeHsnNICs,omitempty"`
-	RouterBMCNics              *[]*HWInvByLoc `json:"RouterBMCNics,omitempty"`
+	CabinetPDUNics      *[]*HWInvByLoc `json:"CabinetPDUNics,omitempty"`
+	NodePowerConnectors *[]*HWInvByLoc `json:"NodePowerConnectors,omitempty"`
+	NodeBMCNics         *[]*HWInvByLoc `json:"NodeBMCNics,omitempty"`
+	NodeNICs            *[]*HWInvByLoc `json:"NodeNICs,omitempty"`
+	RouterBMCNics       *[]*HWInvByLoc `json:"RouterBMCNics,omitempty"`
 
 	// Also not implemented yet.  Not clear if these will have any interesting
 	// info, so they may never be,
@@ -181,6 +200,12 @@ func NewSystemHWInventory(hwlocs []*HWInvByLoc, xName, format string) (*SystemHW
 				hwinv.Nodes = &arr
 			}
 			*hwinv.Nodes = append(*hwinv.Nodes, hwloc)
+		case base.NodeAccel:
+			if hwinv.NodeAccels == nil {
+				arr := make([]*HWInvByLoc, 0, 1)
+				hwinv.NodeAccels = &arr
+			}
+			*hwinv.NodeAccels = append(*hwinv.NodeAccels, hwloc)
 		case base.Processor:
 			if hwinv.Processors == nil {
 				arr := make([]*HWInvByLoc, 0, 1)
@@ -199,6 +224,12 @@ func NewSystemHWInventory(hwlocs []*HWInvByLoc, xName, format string) (*SystemHW
 				hwinv.Drives = &arr
 			}
 			*hwinv.Drives = append(*hwinv.Drives, hwloc)
+		case base.NodeHsnNic:
+			if hwinv.NodeHsnNICs == nil {
+				arr := make([]*HWInvByLoc, 0, 1)
+				hwinv.NodeHsnNICs = &arr
+			}
+			*hwinv.NodeHsnNICs = append(*hwinv.NodeHsnNICs, hwloc)
 		case base.CabinetPDU:
 			if hwinv.CabinetPDUs == nil {
 				arr := make([]*HWInvByLoc, 0, 1)
@@ -206,11 +237,43 @@ func NewSystemHWInventory(hwlocs []*HWInvByLoc, xName, format string) (*SystemHW
 			}
 			*hwinv.CabinetPDUs = append(*hwinv.CabinetPDUs, hwloc)
 		case base.CabinetPDUOutlet:
+			fallthrough
+		case base.CabinetPDUPowerConnector:
 			if hwinv.CabinetPDUOutlets == nil {
 				arr := make([]*HWInvByLoc, 0, 1)
 				hwinv.CabinetPDUOutlets = &arr
 			}
 			*hwinv.CabinetPDUOutlets = append(*hwinv.CabinetPDUOutlets, hwloc)
+		case base.CMMRectifier:
+			if hwinv.CMMRectifiers == nil {
+				arr := make([]*HWInvByLoc, 0, 1)
+				hwinv.CMMRectifiers = &arr
+			}
+			*hwinv.CMMRectifiers = append(*hwinv.CMMRectifiers, hwloc)
+		case base.NodeEnclosurePowerSupply:
+			if hwinv.NodeEnclosurePowerSupplies == nil {
+				arr := make([]*HWInvByLoc, 0, 1)
+				hwinv.NodeEnclosurePowerSupplies = &arr
+			}
+			*hwinv.NodeEnclosurePowerSupplies = append(*hwinv.NodeEnclosurePowerSupplies, hwloc)
+		case base.NodeAccelRiser:
+			if hwinv.NodeAccelRisers == nil {
+				arr := make([]*HWInvByLoc, 0, 1)
+				hwinv.NodeAccelRisers = &arr
+			}
+			*hwinv.NodeAccelRisers = append(*hwinv.NodeAccelRisers, hwloc)
+		case base.NodeBMC:
+			if hwinv.NodeBMCs == nil {
+				arr := make([]*HWInvByLoc, 0, 1)
+				hwinv.NodeBMCs = &arr
+			}
+			*hwinv.NodeBMCs = append(*hwinv.NodeBMCs, hwloc)
+		case base.RouterBMC:
+			if hwinv.RouterBMCs == nil {
+				arr := make([]*HWInvByLoc, 0, 1)
+				hwinv.RouterBMCs = &arr
+			}
+			*hwinv.RouterBMCs = append(*hwinv.RouterBMCs, hwloc)
 		case base.HMSTypeInvalid:
 			err = base.ErrHMSTypeInvalid
 		// Not supported for this type.
@@ -240,13 +303,19 @@ func NewSystemHWInventory(hwlocs []*HWInvByLoc, xName, format string) (*SystemHW
 		}
 
 		procArray := hwinv.Processors
+		nodeAccelArray := hwinv.NodeAccels
 		memArray := hwinv.Memory
 		driveArray := hwinv.Drives
+		hsnNicArray := hwinv.NodeHsnNICs
+		nodeAccelRiserArray := hwinv.NodeAccelRisers
 		// Moving these contents to underneath items in node array.
 		// Set these arrays to nil so we won't list them twice.
 		hwinv.Processors = nil
+		hwinv.NodeAccels = nil
 		hwinv.Memory = nil
 		hwinv.Drives = nil
+		hwinv.NodeHsnNICs = nil
+		hwinv.NodeAccelRisers = nil
 
 		// Processors are children of Node
 		if procArray != nil {
@@ -268,6 +337,29 @@ func NewSystemHWInventory(hwlocs []*HWInvByLoc, xName, format string) (*SystemHW
 						parent.Processors = &arr
 					}
 					*parent.Processors = append(*parent.Processors, p)
+				}
+			}
+		}
+		// NodeAccels (GPUs) are children of Node
+		if nodeAccelArray != nil {
+			for _, na := range *nodeAccelArray {
+				parentID := base.GetHMSCompParent(na.ID)
+				parent, ok := nmap[parentID]
+				if !ok {
+					errlog.Printf("ERROR: Could not find node key %s for %s",
+						parentID, na.ID)
+					if hwinv.NodeAccels == nil {
+						arr := make([]*HWInvByLoc, 0, 1)
+						hwinv.NodeAccels = &arr
+					}
+					// Put orphan components back in their array
+					*hwinv.NodeAccels = append(*hwinv.NodeAccels, na)
+				} else {
+					if parent.NodeAccels == nil {
+						arr := make([]*HWInvByLoc, 0, 1)
+						parent.NodeAccels = &arr
+					}
+					*parent.NodeAccels = append(*parent.NodeAccels, na)
 				}
 			}
 		}
@@ -318,6 +410,54 @@ func NewSystemHWInventory(hwlocs []*HWInvByLoc, xName, format string) (*SystemHW
 						parent.Drives = &arr
 					}
 					*parent.Drives = append(*parent.Drives, d)
+				}
+			}
+		}
+
+		// HSN NICs are children of Nodes
+		if hsnNicArray != nil {
+			for _, n := range *hsnNicArray {
+				parentID := base.GetHMSCompParent(n.ID)
+				parent, ok := nmap[parentID]
+				if !ok {
+					errlog.Printf("ERROR: Could not find node key %s for %s",
+						parentID, n.ID)
+					if hwinv.NodeHsnNICs == nil {
+						arr := make([]*HWInvByLoc, 0, 1)
+						hwinv.NodeHsnNICs = &arr
+					}
+					// Put orphan components back in their array
+					*hwinv.NodeHsnNICs = append(*hwinv.NodeHsnNICs, n)
+				} else {
+					if parent.NodeHsnNICs == nil {
+						arr := make([]*HWInvByLoc, 0, 1)
+						parent.NodeHsnNICs = &arr
+					}
+					*parent.NodeHsnNICs = append(*parent.NodeHsnNICs, n)
+				}
+			}
+		}
+
+		// NodeAccelRisers are children of Nodes
+		if nodeAccelRiserArray != nil {
+			for _, n := range *nodeAccelRiserArray {
+				parentID := base.GetHMSCompParent(n.ID)
+				parent, ok := nmap[parentID]
+				if !ok {
+					errlog.Printf("ERROR: Could not find node key %s for %s",
+						parentID, n.ID)
+					if hwinv.NodeAccelRisers == nil {
+						arr := make([]*HWInvByLoc, 0, 1)
+						hwinv.NodeAccelRisers = &arr
+					}
+					// Put orphan components back in their array
+					*hwinv.NodeAccelRisers = append(*hwinv.NodeAccelRisers, n)
+				} else {
+					if parent.NodeAccelRisers == nil {
+						arr := make([]*HWInvByLoc, 0, 1)
+						parent.NodeAccelRisers = &arr
+					}
+					*parent.NodeAccelRisers = append(*parent.NodeAccelRisers, n)
 				}
 			}
 		}
@@ -375,6 +515,391 @@ func NewSystemHWInventory(hwlocs []*HWInvByLoc, xName, format string) (*SystemHW
 	return hwinv, err
 }
 
+// Fills out and verifies HW Inventory entries coming from external sources
+func NewHWInvByLocs(hwlocs []HWInvByLoc) ([]*HWInvByLoc, error) {
+	var err error
+	var hls []*HWInvByLoc
+	re := regexp.MustCompile(`[0-9]+$`)
+
+	for _, hwloc := range hwlocs {
+		hwloc.ID = base.NormalizeHMSCompID(hwloc.ID)
+		hmsType := base.GetHMSType(hwloc.ID)
+		if hmsType == base.HMSTypeInvalid {
+			return hls, ErrHWLocInvalid //TODO: Define error
+		}
+		hwloc.Type = hmsType.String()
+		ordinalStr := re.FindString(hwloc.ID)
+		hwloc.Ordinal, _ = strconv.Atoi(ordinalStr)
+		hwloc.Status = "Populated"
+		if hwloc.PopulatedFRU == nil {
+			return hls, ErrHWInvMissingFRU
+		}
+		hwloc.PopulatedFRU.Type = hwloc.Type
+		switch hmsType {
+		case base.Cabinet:
+			if hwloc.HMSCabinetLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSCabinetFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocCabinet
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUCabinet
+			c := new(rf.EpChassis)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.ChassisRF.Manufacturer = hwloc.PopulatedFRU.HMSCabinetFRUInfo.Manufacturer
+			c.ChassisRF.PartNumber = hwloc.PopulatedFRU.HMSCabinetFRUInfo.PartNumber
+			c.ChassisRF.SerialNumber = hwloc.PopulatedFRU.HMSCabinetFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetChassisFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.Chassis:
+			if hwloc.HMSChassisLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSChassisFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocChassis
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUChassis
+			c := new(rf.EpChassis)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.ChassisRF.Manufacturer = hwloc.PopulatedFRU.HMSChassisFRUInfo.Manufacturer
+			c.ChassisRF.PartNumber = hwloc.PopulatedFRU.HMSChassisFRUInfo.PartNumber
+			c.ChassisRF.SerialNumber = hwloc.PopulatedFRU.HMSChassisFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetChassisFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.ComputeModule:
+			if hwloc.HMSComputeModuleLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSComputeModuleFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocComputeModule
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUComputeModule
+			c := new(rf.EpChassis)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.ChassisRF.Manufacturer = hwloc.PopulatedFRU.HMSComputeModuleFRUInfo.Manufacturer
+			c.ChassisRF.PartNumber = hwloc.PopulatedFRU.HMSComputeModuleFRUInfo.PartNumber
+			c.ChassisRF.SerialNumber = hwloc.PopulatedFRU.HMSComputeModuleFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetChassisFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.RouterModule:
+			if hwloc.HMSRouterModuleLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSRouterModuleFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocRouterModule
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRURouterModule
+			c := new(rf.EpChassis)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.ChassisRF.Manufacturer = hwloc.PopulatedFRU.HMSRouterModuleFRUInfo.Manufacturer
+			c.ChassisRF.PartNumber = hwloc.PopulatedFRU.HMSRouterModuleFRUInfo.PartNumber
+			c.ChassisRF.SerialNumber = hwloc.PopulatedFRU.HMSRouterModuleFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetChassisFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.NodeEnclosure:
+			if hwloc.HMSNodeEnclosureLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSNodeEnclosureFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocNodeEnclosure
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUNodeEnclosure
+			c := new(rf.EpChassis)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.ChassisRF.Manufacturer = hwloc.PopulatedFRU.HMSNodeEnclosureFRUInfo.Manufacturer
+			c.ChassisRF.PartNumber = hwloc.PopulatedFRU.HMSNodeEnclosureFRUInfo.PartNumber
+			c.ChassisRF.SerialNumber = hwloc.PopulatedFRU.HMSNodeEnclosureFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetChassisFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.HSNBoard:
+			if hwloc.HMSHSNBoardLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSHSNBoardFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocHSNBoard
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUHSNBoard
+			c := new(rf.EpChassis)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.ChassisRF.Manufacturer = hwloc.PopulatedFRU.HMSHSNBoardFRUInfo.Manufacturer
+			c.ChassisRF.PartNumber = hwloc.PopulatedFRU.HMSHSNBoardFRUInfo.PartNumber
+			c.ChassisRF.SerialNumber = hwloc.PopulatedFRU.HMSHSNBoardFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetChassisFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.Node:
+			if hwloc.HMSNodeLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSNodeFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocNode
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUNode
+			c := new(rf.EpSystem)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.SystemRF.Manufacturer = hwloc.PopulatedFRU.HMSNodeFRUInfo.Manufacturer
+			c.SystemRF.PartNumber = hwloc.PopulatedFRU.HMSNodeFRUInfo.PartNumber
+			c.SystemRF.SerialNumber = hwloc.PopulatedFRU.HMSNodeFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetSystemFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.NodeAccel:
+			if hwloc.HMSNodeAccelLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSNodeAccelFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocNodeAccel
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUNodeAccel
+			c := new(rf.EpProcessor)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.ProcessorRF.Manufacturer = hwloc.PopulatedFRU.HMSNodeAccelFRUInfo.Manufacturer
+			c.ProcessorRF.PartNumber = hwloc.PopulatedFRU.HMSNodeAccelFRUInfo.PartNumber
+			c.ProcessorRF.SerialNumber = hwloc.PopulatedFRU.HMSNodeAccelFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetProcessorFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.Processor:
+			if hwloc.HMSProcessorLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSProcessorFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocProcessor
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUProcessor
+			c := new(rf.EpProcessor)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.ProcessorRF.Manufacturer = hwloc.PopulatedFRU.HMSProcessorFRUInfo.Manufacturer
+			c.ProcessorRF.PartNumber = hwloc.PopulatedFRU.HMSProcessorFRUInfo.PartNumber
+			c.ProcessorRF.SerialNumber = hwloc.PopulatedFRU.HMSProcessorFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetProcessorFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.Memory:
+			if hwloc.HMSMemoryLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSMemoryFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocMemory
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUMemory
+			c := new(rf.EpMemory)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.MemoryRF.Manufacturer = hwloc.PopulatedFRU.HMSMemoryFRUInfo.Manufacturer
+			c.MemoryRF.PartNumber = hwloc.PopulatedFRU.HMSMemoryFRUInfo.PartNumber
+			c.MemoryRF.SerialNumber = hwloc.PopulatedFRU.HMSMemoryFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetMemoryFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.Drive:
+			if hwloc.HMSDriveLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSDriveFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocDrive
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUDrive
+			c := new(rf.EpDrive)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.DriveRF.Manufacturer = hwloc.PopulatedFRU.HMSDriveFRUInfo.Manufacturer
+			c.DriveRF.PartNumber = hwloc.PopulatedFRU.HMSDriveFRUInfo.PartNumber
+			c.DriveRF.SerialNumber = hwloc.PopulatedFRU.HMSDriveFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetDriveFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.NodeHsnNic:
+			if hwloc.HMSHSNNICLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSHSNNICFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocHSNNIC
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUHSNNIC
+			hwloc.PopulatedFRU.FRUID = rf.GetHSNNICFRUID(hwloc.Type, hwloc.ID, hwloc.PopulatedFRU.HMSHSNNICFRUInfo.Manufacturer, hwloc.PopulatedFRU.HMSHSNNICFRUInfo.PartNumber, hwloc.PopulatedFRU.HMSHSNNICFRUInfo.SerialNumber)
+			if err != nil {
+				return hls, err
+			}
+		case base.CabinetPDU:
+			if hwloc.HMSPDULocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSPDUFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocPDU
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUPDU
+			c := new(rf.EpPDU)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.PowerDistributionRF.Manufacturer = hwloc.PopulatedFRU.HMSPDUFRUInfo.Manufacturer
+			c.PowerDistributionRF.PartNumber = hwloc.PopulatedFRU.HMSPDUFRUInfo.PartNumber
+			c.PowerDistributionRF.SerialNumber = hwloc.PopulatedFRU.HMSPDUFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetPDUFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.CabinetPDUOutlet:
+			fallthrough
+		case base.CabinetPDUPowerConnector:
+			if hwloc.HMSOutletLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSOutletFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocOutlet
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUOutlet
+			// Outlets need to be given their FRUID from info from the PDU
+			// since their struct doesn't include the proper FRU info.
+			if hwloc.PopulatedFRU.FRUID == "" {
+				hwloc.PopulatedFRU.FRUID = "FRUIDfor" + hwloc.ID
+			}
+			if err != nil {
+				return hls, err
+			}
+		case base.CMMRectifier:
+			if hwloc.HMSCMMRectifierLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSCMMRectifierFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocCMMRectifier
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUCMMRectifier
+			c := new(rf.EpPowerSupply)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.PowerSupplyRF.Manufacturer = hwloc.PopulatedFRU.HMSCMMRectifierFRUInfo.Manufacturer
+			c.PowerSupplyRF.SerialNumber = hwloc.PopulatedFRU.HMSCMMRectifierFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetPowerSupplyFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.NodeEnclosurePowerSupply:
+			if hwloc.HMSNodeEnclosurePowerSupplyLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSNodeEnclosurePowerSupplyFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocNodeEnclosurePowerSupply
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUNodeEnclosurePowerSupply
+			c := new(rf.EpPowerSupply)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.PowerSupplyRF.Manufacturer = hwloc.PopulatedFRU.HMSNodeEnclosurePowerSupplyFRUInfo.Manufacturer
+			c.PowerSupplyRF.SerialNumber = hwloc.PopulatedFRU.HMSNodeEnclosurePowerSupplyFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetPowerSupplyFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.NodeAccelRiser:
+			if hwloc.HMSNodeAccelRiserLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSNodeAccelRiserFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocNodeAccelRiser
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUNodeAccelRiser
+			c := new(rf.EpNodeAccelRiser)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.NodeAccelRiserRF.Producer = hwloc.PopulatedFRU.HMSNodeAccelRiserFRUInfo.Producer
+			c.NodeAccelRiserRF.SerialNumber = hwloc.PopulatedFRU.HMSNodeAccelRiserFRUInfo.SerialNumber
+			c.NodeAccelRiserRF.PartNumber = hwloc.PopulatedFRU.HMSNodeAccelRiserFRUInfo.PartNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetNodeAccelRiserFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.NodeBMC:
+			if hwloc.HMSNodeBMCLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSNodeBMCFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocNodeBMC
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRUNodeBMC
+			c := new(rf.EpManager)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.ManagerRF.Manufacturer = hwloc.PopulatedFRU.HMSNodeBMCFRUInfo.Manufacturer
+			c.ManagerRF.PartNumber = hwloc.PopulatedFRU.HMSNodeBMCFRUInfo.PartNumber
+			c.ManagerRF.SerialNumber = hwloc.PopulatedFRU.HMSNodeBMCFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetManagerFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.RouterBMC:
+			if hwloc.HMSRouterBMCLocationInfo == nil {
+				return hls, ErrHWInvMissingLoc
+			}
+			if hwloc.PopulatedFRU.HMSRouterBMCFRUInfo == nil {
+				return hls, ErrHWInvMissingFRUInfo
+			}
+			hwloc.HWInventoryByLocationType = HWInvByLocRouterBMC
+			hwloc.PopulatedFRU.HWInventoryByFRUType = HWInvByFRURouterBMC
+			c := new(rf.EpManager)
+			c.Type = hwloc.Type
+			c.ID = hwloc.ID
+			c.ManagerRF.Manufacturer = hwloc.PopulatedFRU.HMSNodeBMCFRUInfo.Manufacturer
+			c.ManagerRF.PartNumber = hwloc.PopulatedFRU.HMSNodeBMCFRUInfo.PartNumber
+			c.ManagerRF.SerialNumber = hwloc.PopulatedFRU.HMSNodeBMCFRUInfo.SerialNumber
+			hwloc.PopulatedFRU.FRUID, err = rf.GetManagerFRUID(c)
+			if err != nil {
+				return hls, err
+			}
+		case base.HMSTypeInvalid:
+			return hls, base.ErrHMSTypeInvalid
+		// Not supported for this type.
+		default:
+			return hls, base.ErrHMSTypeUnsupported
+		}
+		hls = append(hls, &hwloc)
+	}
+	return hls, nil
+}
+
 ////////////////////////////////////////////////////////////////////////////
 //
 // HW Inventory-by-location
@@ -407,13 +932,18 @@ type HWInvByLoc struct {
 	HMSHSNBoardLocationInfo      *rf.ChassisLocationInfoRF   `json:"HSNBoardLocationInfo,omitempty"`
 	HMSNodeLocationInfo          *rf.SystemLocationInfoRF    `json:"NodeLocationInfo,omitempty"`
 	HMSProcessorLocationInfo     *rf.ProcessorLocationInfoRF `json:"ProcessorLocationInfo,omitempty"`
+	HMSNodeAccelLocationInfo     *rf.ProcessorLocationInfoRF `json:"NodeAccelLocationInfo,omitempty"`
 	HMSMemoryLocationInfo        *rf.MemoryLocationInfoRF    `json:"MemoryLocationInfo,omitempty"`
 	HMSDriveLocationInfo         *rf.DriveLocationInfoRF     `json:"DriveLocationInfo,omitempty"`
+	HMSHSNNICLocationInfo        *rf.NALocationInfoRF        `json:"NodeHsnNicLocationInfo,omitempty"`
 
 	HMSPDULocationInfo                      *rf.PowerDistributionLocationInfo `json:"PDULocationInfo,omitempty"`
 	HMSOutletLocationInfo                   *rf.OutletLocationInfo            `json:"OutletLocationInfo,omitempty"`
 	HMSCMMRectifierLocationInfo             *rf.PowerSupplyLocationInfoRF     `json:"CMMRectifierLocationInfo,omitempty"`
 	HMSNodeEnclosurePowerSupplyLocationInfo *rf.PowerSupplyLocationInfoRF     `json:"NodeEnclosurePowerSupplyLocationInfo,omitempty"`
+	HMSNodeBMCLocationInfo                  *rf.ManagerLocationInfoRF         `json:"NodeBMCLocationInfo,omitempty"`
+	HMSRouterBMCLocationInfo                *rf.ManagerLocationInfoRF         `json:"RouterBMCLocationInfo,omitempty"`
+	HMSNodeAccelRiserLocationInfo           *rf.NodeAccelRiserLocationInfoRF  `json:"NodeAccelRiserLocationInfo,omitempty"`
 	// TODO: Remaining types in hmsTypeArrays
 
 	// If status != empty, up to one of following, matching above *Info.
@@ -434,12 +964,17 @@ const (
 	HWInvByLocHSNBoard                 string = "HWInvByLocHSNBoard"
 	HWInvByLocNode                     string = "HWInvByLocNode"
 	HWInvByLocProcessor                string = "HWInvByLocProcessor"
+	HWInvByLocNodeAccel                string = "HWInvByLocNodeAccel"
 	HWInvByLocDrive                    string = "HWInvByLocDrive"
 	HWInvByLocMemory                   string = "HWInvByLocMemory"
+	HWInvByLocHSNNIC                   string = "HWInvByLocNodeHsnNic"
 	HWInvByLocPDU                      string = "HWInvByLocPDU"
 	HWInvByLocOutlet                   string = "HWInvByLocOutlet"
 	HWInvByLocCMMRectifier             string = "HWInvByLocCMMRectifier"
 	HWInvByLocNodeEnclosurePowerSupply string = "HWInvByLocNodeEnclosurePowerSupply"
+	HWInvByLocNodeBMC                  string = "HWInvByLocNodeBMC"
+	HWInvByLocRouterBMC                string = "HWInvByLocRouterBMC"
+	HWInvByLocNodeAccelRiser           string = "HWInvByLocNodeAccelRiser"
 )
 
 ////////////////////////////////////////////////////////////////////////////
@@ -456,16 +991,23 @@ const (
 // Return: If err != nil hw is unmodified,
 //         Else, the type's *LocationInfo pointer is set to the expected struct.
 func (hw *HWInvByLoc) DecodeLocationInfo(locInfoJSON []byte) error {
-	var err error
-	var rfChassisLocationInfo *rf.ChassisLocationInfoRF
-	var rfSystemLocationInfo *rf.SystemLocationInfoRF
-	var rfProcessorLocationInfo *rf.ProcessorLocationInfoRF
-	var rfDriveLocationInfo *rf.DriveLocationInfoRF
-	var rfMemoryLocationInfo *rf.MemoryLocationInfoRF
-	var rfPDULocationInfo *rf.PowerDistributionLocationInfo
-	var rfOutletLocationInfo *rf.OutletLocationInfo
-	var rfCMMRectifierLocationInfo *rf.PowerSupplyLocationInfoRF
-	var rfNodeEnclosurePowerSupplyLocationInfo *rf.PowerSupplyLocationInfoRF
+	var (
+		err                                    error
+		rfChassisLocationInfo                  *rf.ChassisLocationInfoRF
+		rfSystemLocationInfo                   *rf.SystemLocationInfoRF
+		rfProcessorLocationInfo                *rf.ProcessorLocationInfoRF
+		rfNodeAccelLocationInfo                *rf.ProcessorLocationInfoRF
+		rfDriveLocationInfo                    *rf.DriveLocationInfoRF
+		rfMemoryLocationInfo                   *rf.MemoryLocationInfoRF
+		rfHSNNICLocationInfo                   *rf.NALocationInfoRF
+		rfPDULocationInfo                      *rf.PowerDistributionLocationInfo
+		rfOutletLocationInfo                   *rf.OutletLocationInfo
+		rfCMMRectifierLocationInfo             *rf.PowerSupplyLocationInfoRF
+		rfNodeEnclosurePowerSupplyLocationInfo *rf.PowerSupplyLocationInfoRF
+		rfNodeBMCLocationInfo                  *rf.ManagerLocationInfoRF
+		rfRouterBMCLocationInfo                *rf.ManagerLocationInfoRF
+		rfNodeAccelRiserLocationInfo           *rf.NodeAccelRiserLocationInfoRF
+	)
 
 	switch base.ToHMSType(hw.Type) {
 	// HWInv based on Redfish "Chassis" Type.  Identical structs (for now).
@@ -513,6 +1055,14 @@ func (hw *HWInvByLoc) DecodeLocationInfo(locInfoJSON []byte) error {
 			hw.HMSNodeLocationInfo = rfSystemLocationInfo
 			hw.HWInventoryByLocationType = HWInvByLocNode
 		}
+	// HWInv based on "GPU" type
+	case base.NodeAccel:
+		rfNodeAccelLocationInfo = new(rf.ProcessorLocationInfoRF)
+		err = json.Unmarshal(locInfoJSON, rfNodeAccelLocationInfo)
+		if err == nil {
+			hw.HMSNodeAccelLocationInfo = rfNodeAccelLocationInfo
+			hw.HWInventoryByLocationType = HWInvByLocNodeAccel
+		}
 	// HWInv based on Redfish "Processor" Type.
 	case base.Processor:
 		rfProcessorLocationInfo = new(rf.ProcessorLocationInfoRF)
@@ -529,13 +1079,21 @@ func (hw *HWInvByLoc) DecodeLocationInfo(locInfoJSON []byte) error {
 			hw.HMSMemoryLocationInfo = rfMemoryLocationInfo
 			hw.HWInventoryByLocationType = HWInvByLocMemory
 		}
-	// HWInv based on Redfish "Processor" Type.
+	// HWInv based on Redfish "Drive" Type.
 	case base.Drive:
 		rfDriveLocationInfo = new(rf.DriveLocationInfoRF)
 		err = json.Unmarshal(locInfoJSON, rfDriveLocationInfo)
 		if err == nil {
 			hw.HMSDriveLocationInfo = rfDriveLocationInfo
 			hw.HWInventoryByLocationType = HWInvByLocDrive
+		}
+	// HWInv based on Redfish "HSN NIC" Type.
+	case base.NodeHsnNic:
+		rfHSNNICLocationInfo = new(rf.NALocationInfoRF)
+		err = json.Unmarshal(locInfoJSON, rfHSNNICLocationInfo)
+		if err == nil {
+			hw.HMSHSNNICLocationInfo = rfHSNNICLocationInfo
+			hw.HWInventoryByLocationType = HWInvByLocHSNNIC
 		}
 	// HWInv based on Redfish "PowerDistribution" (aka PDU) Type.
 	case base.CabinetPDU:
@@ -547,6 +1105,8 @@ func (hw *HWInvByLoc) DecodeLocationInfo(locInfoJSON []byte) error {
 		}
 	// HWInv based on Redfish "Outlet" (e.g. of a PDU) Type.
 	case base.CabinetPDUOutlet:
+		fallthrough
+	case base.CabinetPDUPowerConnector:
 		rfOutletLocationInfo = new(rf.OutletLocationInfo)
 		err = json.Unmarshal(locInfoJSON, rfOutletLocationInfo)
 		if err == nil {
@@ -566,6 +1126,27 @@ func (hw *HWInvByLoc) DecodeLocationInfo(locInfoJSON []byte) error {
 		if err == nil {
 			hw.HMSNodeEnclosurePowerSupplyLocationInfo = rfNodeEnclosurePowerSupplyLocationInfo
 			hw.HWInventoryByLocationType = HWInvByLocNodeEnclosurePowerSupply
+		}
+	case base.NodeAccelRiser:
+		rfNodeAccelRiserLocationInfo = new(rf.NodeAccelRiserLocationInfoRF)
+		err = json.Unmarshal(locInfoJSON, rfNodeAccelRiserLocationInfo)
+		if err == nil {
+			hw.HMSNodeAccelRiserLocationInfo = rfNodeAccelRiserLocationInfo
+			hw.HWInventoryByLocationType = HWInvByLocNodeAccelRiser
+		}
+	case base.NodeBMC:
+		rfNodeBMCLocationInfo = new(rf.ManagerLocationInfoRF)
+		err = json.Unmarshal(locInfoJSON, rfNodeBMCLocationInfo)
+		if err == nil {
+			hw.HMSNodeBMCLocationInfo = rfNodeBMCLocationInfo
+			hw.HWInventoryByLocationType = HWInvByLocNodeBMC
+		}
+	case base.RouterBMC:
+		rfRouterBMCLocationInfo = new(rf.ManagerLocationInfoRF)
+		err = json.Unmarshal(locInfoJSON, rfRouterBMCLocationInfo)
+		if err == nil {
+			hw.HMSRouterBMCLocationInfo = rfRouterBMCLocationInfo
+			hw.HWInventoryByLocationType = HWInvByLocRouterBMC
 		}
 	// No match - not a valid HMSType, always an error
 	case base.HMSTypeInvalid:
@@ -606,6 +1187,9 @@ func (hw *HWInvByLoc) EncodeLocationInfo() ([]byte, error) {
 	// HWInv based on Redfish "System" Type.
 	case base.Node:
 		locInfoJSON, err = json.Marshal(hw.HMSNodeLocationInfo)
+	// HWInv based on "GPU" type
+	case base.NodeAccel:
+		locInfoJSON, err = json.Marshal(hw.HMSNodeAccelLocationInfo)
 	// HWInv based on Redfish "Processor" Type.
 	case base.Processor:
 		locInfoJSON, err = json.Marshal(hw.HMSProcessorLocationInfo)
@@ -615,16 +1199,27 @@ func (hw *HWInvByLoc) EncodeLocationInfo() ([]byte, error) {
 	// HWInv based on Redfish "Drive" Type.
 	case base.Drive:
 		locInfoJSON, err = json.Marshal(hw.HMSDriveLocationInfo)
+	// HWInv based on Redfish "HSN NIC" Type.
+	case base.NodeHsnNic:
+		locInfoJSON, err = json.Marshal(hw.HMSHSNNICLocationInfo)
 	// HWInv based on Redfish "PowerDistribution" (aka PDU) Type.
 	case base.CabinetPDU:
 		locInfoJSON, err = json.Marshal(hw.HMSPDULocationInfo)
 	// HWInv based on Redfish "Outlet" (e.g. of a PDU) Type.
 	case base.CabinetPDUOutlet:
+		fallthrough
+	case base.CabinetPDUPowerConnector:
 		locInfoJSON, err = json.Marshal(hw.HMSOutletLocationInfo)
 	case base.CMMRectifier:
 		locInfoJSON, err = json.Marshal(hw.HMSCMMRectifierLocationInfo)
 	case base.NodeEnclosurePowerSupply:
 		locInfoJSON, err = json.Marshal(hw.HMSNodeEnclosurePowerSupplyLocationInfo)
+	case base.NodeAccelRiser:
+		locInfoJSON, err = json.Marshal(hw.HMSNodeAccelRiserLocationInfo)
+	case base.NodeBMC:
+		locInfoJSON, err = json.Marshal(hw.HMSNodeBMCLocationInfo)
+	case base.RouterBMC:
+		locInfoJSON, err = json.Marshal(hw.HMSRouterBMCLocationInfo)
 	// No match - not a valid HMS Type, always an error
 	case base.HMSTypeInvalid:
 		err = base.ErrHMSTypeInvalid
@@ -664,15 +1259,20 @@ type HWInvByFRU struct {
 	HMSHSNBoardFRUInfo      *rf.ChassisFRUInfoRF   `json:"HSNBoardFRUInfo,omitempty"`
 	HMSNodeFRUInfo          *rf.SystemFRUInfoRF    `json:"NodeFRUInfo,omitempty"`
 	HMSProcessorFRUInfo     *rf.ProcessorFRUInfoRF `json:"ProcessorFRUInfo,omitempty"`
+	HMSNodeAccelFRUInfo     *rf.ProcessorFRUInfoRF `json:"NodeAccelFRUInfo,omitempty"`
 	HMSMemoryFRUInfo        *rf.MemoryFRUInfoRF    `json:"MemoryFRUInfo,omitempty"`
 	HMSDriveFRUInfo         *rf.DriveFRUInfoRF     `json:"DriveFRUInfo,omitempty"`
+	HMSHSNNICFRUInfo        *rf.NAFRUInfoRF        `json:"NodeHsnNicFRUInfo,omitempty"`
 
 	HMSPDUFRUInfo                      *rf.PowerDistributionFRUInfo `json:"PDUFRUInfo,omitempty"`
 	HMSOutletFRUInfo                   *rf.OutletFRUInfo            `json:"OutletFRUInfo,omitempty"`
 	HMSCMMRectifierFRUInfo             *rf.PowerSupplyFRUInfoRF     `json:"CMMRectifierFRUInfo,omitempty"`
 	HMSNodeEnclosurePowerSupplyFRUInfo *rf.PowerSupplyFRUInfoRF     `json:"NodeEnclosurePowerSupplyFRUInfo,omitempty"`
+	HMSNodeBMCFRUInfo                  *rf.ManagerFRUInfoRF         `json:"NodeBMCFRUInfo,omitempty"`
+	HMSRouterBMCFRUInfo                *rf.ManagerFRUInfoRF         `json:"RouterBMCFRUInfo,omitempty"`
+	HMSNodeAccelRiserFRUInfo           *rf.NodeAccelRiserFRUInfoRF  `json:"NodeAccelRiserFRUInfo,omitempty"`
 
-	// TODO: Remaining types in hmsTypeArrays
+	// TODO: Remaining types in hmsTypeArray
 }
 
 // HWInventoryByFRUType properties.  Used to select proper subtype in
@@ -687,12 +1287,17 @@ const (
 	HWInvByFRUHSNBoard                 string = "HWInvByFRUHSNBoard"
 	HWInvByFRUNode                     string = "HWInvByFRUNode"
 	HWInvByFRUProcessor                string = "HWInvByFRUProcessor"
+	HWInvByFRUNodeAccel                string = "HWInvByFRUNodeAccel"
 	HWInvByFRUMemory                   string = "HWInvByFRUMemory"
 	HWInvByFRUDrive                    string = "HWInvByFRUDrive"
+	HWInvByFRUHSNNIC                   string = "HWInvByFRUNodeHsnNic"
 	HWInvByFRUPDU                      string = "HWInvByFRUPDU"
 	HWInvByFRUOutlet                   string = "HWInvByFRUOutlet"
 	HWInvByFRUCMMRectifier             string = "HWInvByFRUCMMRectifier"
-	HWInvByFRUNodeEnclosurePowerSupply string = "HWInvByFRU"
+	HWInvByFRUNodeEnclosurePowerSupply string = "HWInvByFRUNodeEnclosurePowerSupply"
+	HWInvByFRUNodeBMC                  string = "HWInvByFRUNodeBMC"
+	HWInvByFRURouterBMC                string = "HWInvByFRURouterBMC"
+	HWInvByFRUNodeAccelRiser           string = "HWInvByFRUNodeAccelRiser"
 )
 
 ////////////////////////////////////////////////////////////////////////////
@@ -709,16 +1314,23 @@ const (
 // Return: If err != nil hf is unmodified and operation failed.
 //         Else, the type's *FRUInfo pointer is set to the expected struct.
 func (hf *HWInvByFRU) DecodeFRUInfo(fruInfoJSON []byte) error {
-	var err error = nil
-	var rfChassisFRUInfo *rf.ChassisFRUInfoRF
-	var rfSystemFRUInfo *rf.SystemFRUInfoRF
-	var rfProcessorFRUInfo *rf.ProcessorFRUInfoRF
-	var rfMemoryFRUInfo *rf.MemoryFRUInfoRF
-	var rfDriveFRUInfo *rf.DriveFRUInfoRF
-	var rfPDUFRUInfo *rf.PowerDistributionFRUInfo
-	var rfOutletFRUInfo *rf.OutletFRUInfo
-	var rfCMMRectifierFRUInfo *rf.PowerSupplyFRUInfoRF
-	var rfNodeEnclosurePowerSupplyFRUInfo *rf.PowerSupplyFRUInfoRF
+	var (
+		err                               error = nil
+		rfChassisFRUInfo                  *rf.ChassisFRUInfoRF
+		rfSystemFRUInfo                   *rf.SystemFRUInfoRF
+		rfProcessorFRUInfo                *rf.ProcessorFRUInfoRF
+		rfNodeAccelFRUInfo                *rf.ProcessorFRUInfoRF
+		rfMemoryFRUInfo                   *rf.MemoryFRUInfoRF
+		rfDriveFRUInfo                    *rf.DriveFRUInfoRF
+		rfHSNNICFRUInfo                   *rf.NAFRUInfoRF
+		rfPDUFRUInfo                      *rf.PowerDistributionFRUInfo
+		rfOutletFRUInfo                   *rf.OutletFRUInfo
+		rfCMMRectifierFRUInfo             *rf.PowerSupplyFRUInfoRF
+		rfNodeEnclosurePowerSupplyFRUInfo *rf.PowerSupplyFRUInfoRF
+		rfNodeBMCFRUInfo                  *rf.ManagerFRUInfoRF
+		rfRouterBMCFRUInfo                *rf.ManagerFRUInfoRF
+		rfNodeAccelRiserFRUInfo           *rf.NodeAccelRiserFRUInfoRF
+	)
 
 	switch base.ToHMSType(hf.Type) {
 	// HWInv based on Redfish "Chassis" Type.  Identical structs (for now).
@@ -766,6 +1378,14 @@ func (hf *HWInvByFRU) DecodeFRUInfo(fruInfoJSON []byte) error {
 			hf.HMSNodeFRUInfo = rfSystemFRUInfo
 			hf.HWInventoryByFRUType = HWInvByFRUNode
 		}
+	// HWInv based on "GPU" type
+	case base.NodeAccel:
+		rfNodeAccelFRUInfo = new(rf.ProcessorFRUInfoRF)
+		err = json.Unmarshal(fruInfoJSON, rfNodeAccelFRUInfo)
+		if err == nil {
+			hf.HMSNodeAccelFRUInfo = rfNodeAccelFRUInfo
+			hf.HWInventoryByFRUType = HWInvByFRUNodeAccel
+		}
 	// HWInv based on Redfish "Processor" Type.
 	case base.Processor:
 		rfProcessorFRUInfo = new(rf.ProcessorFRUInfoRF)
@@ -790,6 +1410,14 @@ func (hf *HWInvByFRU) DecodeFRUInfo(fruInfoJSON []byte) error {
 			hf.HMSDriveFRUInfo = rfDriveFRUInfo
 			hf.HWInventoryByFRUType = HWInvByFRUDrive
 		}
+	// HWInv based on Redfish "Memory" Type.
+	case base.NodeHsnNic:
+		rfHSNNICFRUInfo = new(rf.NAFRUInfoRF)
+		err = json.Unmarshal(fruInfoJSON, rfHSNNICFRUInfo)
+		if err == nil {
+			hf.HMSHSNNICFRUInfo = rfHSNNICFRUInfo
+			hf.HWInventoryByFRUType = HWInvByFRUHSNNIC
+		}
 	// HWInv based on Redfish "PowerDistribution" Type.
 	case base.CabinetPDU:
 		rfPDUFRUInfo = new(rf.PowerDistributionFRUInfo)
@@ -800,6 +1428,8 @@ func (hf *HWInvByFRU) DecodeFRUInfo(fruInfoJSON []byte) error {
 		}
 	// HWInv based on Redfish "Outlet" (e.g. of a PDU) Type.
 	case base.CabinetPDUOutlet:
+		fallthrough
+	case base.CabinetPDUPowerConnector:
 		rfOutletFRUInfo = new(rf.OutletFRUInfo)
 		err = json.Unmarshal(fruInfoJSON, rfOutletFRUInfo)
 		if err == nil {
@@ -821,6 +1451,30 @@ func (hf *HWInvByFRU) DecodeFRUInfo(fruInfoJSON []byte) error {
 		if err == nil {
 			hf.HMSNodeEnclosurePowerSupplyFRUInfo = rfNodeEnclosurePowerSupplyFRUInfo
 			hf.HWInventoryByFRUType = HWInvByFRUNodeEnclosurePowerSupply
+		}
+	// HWInv based on Redfish "NodeAccelRiser" Type.
+	case base.NodeAccelRiser:
+		rfNodeAccelRiserFRUInfo = new(rf.NodeAccelRiserFRUInfoRF)
+		err = json.Unmarshal(fruInfoJSON, rfNodeAccelRiserFRUInfo)
+		if err == nil {
+			hf.HMSNodeAccelRiserFRUInfo = rfNodeAccelRiserFRUInfo
+			hf.HWInventoryByFRUType = HWInvByFRUNodeAccelRiser
+		}
+	// HWInv based on Redfish "Manager" Type.
+	case base.NodeBMC:
+		rfNodeBMCFRUInfo = new(rf.ManagerFRUInfoRF)
+		err = json.Unmarshal(fruInfoJSON, rfNodeBMCFRUInfo)
+		if err == nil {
+			hf.HMSNodeBMCFRUInfo = rfNodeBMCFRUInfo
+			hf.HWInventoryByFRUType = HWInvByFRUNodeBMC
+		}
+	// HWInv based on Redfish "Manager" Type.
+	case base.RouterBMC:
+		rfRouterBMCFRUInfo = new(rf.ManagerFRUInfoRF)
+		err = json.Unmarshal(fruInfoJSON, rfRouterBMCFRUInfo)
+		if err == nil {
+			hf.HMSRouterBMCFRUInfo = rfRouterBMCFRUInfo
+			hf.HWInventoryByFRUType = HWInvByFRURouterBMC
 		}
 	// No match - not a valid HMSType, always an error
 	case base.HMSTypeInvalid:
@@ -861,6 +1515,9 @@ func (hf *HWInvByFRU) EncodeFRUInfo() ([]byte, error) {
 	// HWInv based on Redfish "System" Type.
 	case base.Node:
 		fruInfoJSON, err = json.Marshal(hf.HMSNodeFRUInfo)
+	// HWInv based on "GPU" type
+	case base.NodeAccel:
+		fruInfoJSON, err = json.Marshal(hf.HMSNodeAccelFRUInfo)
 	// HWInv based on Redfish "Processor" Type.
 	case base.Processor:
 		fruInfoJSON, err = json.Marshal(hf.HMSProcessorFRUInfo)
@@ -870,11 +1527,16 @@ func (hf *HWInvByFRU) EncodeFRUInfo() ([]byte, error) {
 	// HWInv based on Redfish "Processor" Type.
 	case base.Drive:
 		fruInfoJSON, err = json.Marshal(hf.HMSDriveFRUInfo)
+	// HWInv based on Redfish "HSN NIC" Type.
+	case base.NodeHsnNic:
+		fruInfoJSON, err = json.Marshal(hf.HMSHSNNICFRUInfo)
 	// HWInv based on Redfish "PowerDistribution" (aka PDU) Type.
 	case base.CabinetPDU:
 		fruInfoJSON, err = json.Marshal(hf.HMSPDUFRUInfo)
 	// HWInv based on Redfish "Outlet" (e.g. of a PDU) Type.
 	case base.CabinetPDUOutlet:
+		fallthrough
+	case base.CabinetPDUPowerConnector:
 		fruInfoJSON, err = json.Marshal(hf.HMSOutletFRUInfo)
 	// HWInv based on Redfish "PowerSupply" Type.
 	case base.CMMRectifier:
@@ -882,6 +1544,15 @@ func (hf *HWInvByFRU) EncodeFRUInfo() ([]byte, error) {
 	// HWInv based on Redfish "PowerSupply" Type.
 	case base.NodeEnclosurePowerSupply:
 		fruInfoJSON, err = json.Marshal(hf.HMSNodeEnclosurePowerSupplyFRUInfo)
+	// HWInv based on Redfish "NodeAccelRiser" Type.
+	case base.NodeAccelRiser:
+		fruInfoJSON, err = json.Marshal(hf.HMSNodeAccelRiserFRUInfo)
+	// HWInv based on Redfish "Manager" Type.
+	case base.NodeBMC:
+		fruInfoJSON, err = json.Marshal(hf.HMSNodeBMCFRUInfo)
+	// HWInv based on Redfish "Manager" Type.
+	case base.RouterBMC:
+		fruInfoJSON, err = json.Marshal(hf.HMSRouterBMCFRUInfo)
 	// No match - not a valid HMS Type, always an error
 	case base.HMSTypeInvalid:
 		err = base.ErrHMSTypeInvalid

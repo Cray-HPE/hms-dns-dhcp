@@ -1,16 +1,37 @@
-// Copyright (c) 2019 Cray Inc. All Rights Reserved.
+// MIT License
+//
+// (C) Copyright [2019-2021] Hewlett Packard Enterprise Development LP
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+// OTHER DEALINGS IN THE SOFTWARE.
+
 package rf
 
 import (
-	"crypto/tls"
-	"net/http"
-	"net/url"
-	"time"
+	"os"
+
+	"stash.us.cray.com/HMS/hms-certs/pkg/hms_certs"
 )
 
 var httpClientTimeout = 30
-var httpClientProxyURL = ""
-var httpClientInsecureSkipVerify = true
+
+//var httpClientProxyURL = ""
+//var httpClientInsecureSkipVerify = true
 
 // Setter functions for above.
 
@@ -30,6 +51,7 @@ func GetHTTPClientTimeout() int {
 	return httpClientTimeout
 }
 
+/*
 // Set HTTP client proxy used during Redfish interogation, including port
 // and protocol (see http package: socks5, http, https).  Defaults assigned
 // if info is missing.  If unparsable, will default to no proxy.
@@ -52,24 +74,26 @@ func SetHTTPClientInsecureSkipVerify(flag bool) {
 func GetHTTPClientInsecureSkipVerify() bool {
 	return httpClientInsecureSkipVerify
 }
+*/
 
 // Returns default-configuration HTTP Client
-// TODO: Need to have a way to specify the CA cert used to verify
-//       the Redfish endpoint
-func RfDefaultClient() http.Client {
-	timeout := time.Duration(httpClientTimeout) * time.Second
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: httpClientInsecureSkipVerify,
-		},
+func RfDefaultClient() *hms_certs.HTTPClientPair {
+	uri := os.Getenv("SMD_CA_URI")
+	epClient, cerr := hms_certs.CreateHTTPClientPair(uri, httpClientTimeout)
+	if cerr != nil {
+		errlog.Printf("Can't create TLS cert-enabled HTTP transport, reverting to less secure transport.")
+		epClient, cerr = hms_certs.CreateHTTPClientPair("", httpClientTimeout)
+		if cerr != nil {
+			errlog.Printf("Can't create any HTTP transport!")
+			epClient = nil
+			return nil
+		}
 	}
-	client := http.Client{
-		Transport: transport,
-		Timeout:   timeout,
-	}
-	return client
+
+	return epClient
 }
 
+/*
 // Returns default-configuration HTTP Client with proxy.  If invalid
 // proxy string given, no proxy will be used.
 // TODO: Need to have a way to specify the CA cert used to verify
@@ -94,3 +118,4 @@ func RfProxyClient(proxyURLStr string) http.Client {
 	}
 	return client
 }
+*/
