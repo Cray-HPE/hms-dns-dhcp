@@ -1,12 +1,24 @@
-// Copyright 2018-2020 Cray Inc. All Rights Reserved.
+// MIT License
 //
-// Except as permitted by contract or express written permission of Cray Inc.,
-// no part of this work or its content may be modified, used, reproduced or
-// disclosed in any form. Modifications made without express permission of
-// Cray Inc. may damage the system the software is installed within, may
-// disqualify the user from receiving support from Cray Inc. under support or
-// maintenance contracts, or require additional support services outside the
-// scope of those contracts to repair the software or system.
+// (C) Copyright [2019-2021] Hewlett Packard Enterprise Development LP
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+// OTHER DEALINGS IN THE SOFTWARE.
 
 package rf
 
@@ -14,10 +26,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	base "stash.us.cray.com/HMS/hms-base"
 	"strconv"
 	"strings"
 	"time"
+
+	base "stash.us.cray.com/HMS/hms-base"
 )
 
 /////////////////////////////////////////////////////////////////////////////
@@ -317,7 +330,6 @@ func (c *EpChassis) discoverRemotePhase1() {
 	}
 
 	c.LastStatus = VerifyingData
-
 	if rfVerbose > 0 {
 		jout, _ := json.MarshalIndent(c, "", "   ")
 		errlog.Printf("%s: %s\n", topURL, jout)
@@ -436,7 +448,7 @@ func (c *EpChassis) discoverComponentState() {
 				c.Flag = base.FlagAlert.String()
 			}
 		}
-		generatedFRUID, err := c.epRF.getChassisFRUID(c)
+		generatedFRUID, err := GetChassisFRUID(c)
 		if err != nil {
 			errlog.Printf("FRUID Error: %s\n", err.Error())
 			errlog.Printf("Using untrackable FRUID: %s\n", generatedFRUID)
@@ -683,6 +695,12 @@ func (m *EpManager) discoverLocalPhase2() {
 		m.LastStatus = RedfishSubtypeNoSupport
 		return
 	}
+	generatedFRUID, err := GetManagerFRUID(m)
+	if err != nil {
+		errlog.Printf("FRUID Error: %s\n", err.Error())
+		errlog.Printf("Using untrackable FRUID: %s\n", generatedFRUID)
+	}
+	m.FRUID = generatedFRUID
 	m.Name = m.ManagerRF.Name
 
 	// Sets Manager ComponentEndpoint MACAddress and EthernetNICInfo entries.
@@ -819,7 +837,7 @@ func (m *EpManager) discoverComponentState() {
 			}
 		}
 		// Non-empty, set FRU ID
-		generatedFRUID, err := m.epRF.getManagerFRUID(m)
+		generatedFRUID, err := GetManagerFRUID(m)
 		if err != nil {
 			errlog.Printf("FRUID Error: %s\n", err.Error())
 			errlog.Printf("Using untrackable FRUID: %s\n", generatedFRUID)
@@ -889,6 +907,15 @@ type EpSystem struct {
 	// reference these via the epRF pointer.
 	ENetInterfaces EpEthInterfaces `json:"enetInterfaces"`
 
+	// Assembly and NodeAccelRiser info comes from the Chassis level but we
+	// associate it with nodes (systems) so we record it here.
+	Assembly        *EpAssembly       `json:"Assembly"`
+	NodeAccelRisers EpNodeAccelRisers `json:"NodeAccelRisers"`
+
+	// NetworkAdapter (HSN NIC) info comes from the Chassis level but we
+	// associate it with nodes (systems) so we record it here.
+	NetworkAdapters EpNetworkAdapters `json:"NetworkAdapters"`
+
 	// Power info comes from the chassis level but we associate it with
 	// nodes (systems) so we record it here.
 	PowerInfo PowerInfo `json:"powerInfo"`
@@ -897,6 +924,9 @@ type EpSystem struct {
 	// only of a particular ComputerSystem
 	Processors EpProcessors `json:"processors"`
 	MemoryMods EpMemoryMods `json:"memoryMods"`
+
+	cpuCount   int
+	accelCount int
 
 	StorageGroups EpStorageCollections `json:"storageGroups"`
 	Drives        EpDrives             `json:"drives"`
@@ -929,6 +959,8 @@ func NewEpSystem(epRF *RedfishEP, odataID ResourceID, rawOrdinal int) *EpSystem 
 	s.Ordinal = -1
 	s.RawOrdinal = rawOrdinal
 	s.epRF = epRF
+	s.cpuCount = 0
+	s.accelCount = 0
 	return s
 }
 
@@ -1079,34 +1111,110 @@ func (s *EpSystem) discoverRemotePhase1() {
 	}
 
 	//
-	// Get PowerControl Info if it exists
+	// Get Chassis-level info associated with the system (node)
 	//
+	// Some info (Power, NodeAccelRiser, HSN NIC, etc) is at the chassis level
+	// but we associate it with nodes (systems). There will be a chassis URL
+	// with our system's id if there is info to get.
+	nodeChassis, ok := s.epRF.Chassis.OIDs[s.SystemRF.Id]
+	if ok {
 
-	// Power info is at the chassis level but we associate it with nodes
-	// (systems). There will be a chassis URL with our system's id if there
-	// is power info to get.
-	pwrCtlChassis, ok := s.epRF.Chassis.OIDs[s.SystemRF.Id]
-	if ok && pwrCtlChassis.ChassisRF.Power.Oid != "" {
-		path = pwrCtlChassis.ChassisRF.Power.Oid
-		pwrCtlURLJSON, err := s.epRF.GETRelative(path)
-		if err != nil || pwrCtlURLJSON == nil {
-			s.LastStatus = HTTPsGetFailed
-			return
-		}
-		s.PowerURL = path
-		s.LastStatus = HTTPsGetOk
-
-		// Decode JSON into PowerControl structure
-		if err := json.Unmarshal(pwrCtlURLJSON, &s.PowerInfo); err != nil {
-			if IsUnmarshalTypeError(err) {
-				errlog.Printf("bad field(s) skipped: %s: %s\n", url, err)
-			} else {
-				errlog.Printf("ERROR: json decode failed: %s: %s\n", url, err)
-				s.LastStatus = EPResponseFailedDecode
+		//
+		// Get PowerControl Info if it exists
+		//
+		if nodeChassis.ChassisRF.Power.Oid != "" {
+			path = nodeChassis.ChassisRF.Power.Oid
+			pwrCtlURLJSON, err := s.epRF.GETRelative(path)
+			if err != nil || pwrCtlURLJSON == nil {
+				s.LastStatus = HTTPsGetFailed
 				return
 			}
+			s.PowerURL = path
+			s.LastStatus = HTTPsGetOk
+
+			// Decode JSON into PowerControl structure
+			if err := json.Unmarshal(pwrCtlURLJSON, &s.PowerInfo); err != nil {
+				if IsUnmarshalTypeError(err) {
+					errlog.Printf("bad field(s) skipped: %s: %s\n", url, err)
+				} else {
+					errlog.Printf("ERROR: json decode failed: %s: %s\n", url, err)
+					s.LastStatus = EPResponseFailedDecode
+					return
+				}
+			}
+			s.PowerCtl = s.PowerInfo.PowerControl
 		}
-		s.PowerCtl = s.PowerInfo.PowerControl
+
+		//
+		// Get Chassis assembly (NodeAccelRiser) info if it exists
+		//
+		if nodeChassis.ChassisRF.Assembly.Oid == "" {
+			//errlog.Printf("%s: No assembly obj found.\n", topURL)
+			s.NodeAccelRisers.Num = 0
+			s.NodeAccelRisers.OIDs = make(map[string]*EpNodeAccelRiser)
+		} else {
+			//create a new EpAssembly object using chassis and Assembly.OID
+			s.Assembly = NewEpAssembly(s, nodeChassis.ChassisRF.Assembly, nodeChassis.OdataID, nodeChassis.RedfishType)
+
+			//retrieve the Assembly RF
+			s.Assembly.discoverRemotePhase1()
+
+			//discover any NodeAccelRiser cards
+			if len(s.Assembly.AssemblyRF.Assemblies) > 0 {
+				s.NodeAccelRisers.OIDs = make(map[string]*EpNodeAccelRiser)
+				indexNodeAccelRisersOIDs := 0
+				for i, assembly := range s.Assembly.AssemblyRF.Assemblies {
+					//Need to ignore any assembly that is not a GPUSubsystem
+					if assembly.PhysicalContext == NodeAccelRiserType {
+						rID := assembly.Oid
+						s.NodeAccelRisers.OIDs[rID] = NewEpNodeAccelRiser(s.Assembly, ResourceID{rID}, i)
+						indexNodeAccelRisersOIDs++
+					}
+				}
+				//have to set the Num of NodeAccelRisers only after iterating across the Assemblies array
+				//and identifying each individual NodeAccelRiser
+				s.NodeAccelRisers.Num = len(s.NodeAccelRisers.OIDs)
+				//invoke the series of discoverRemotePhase1 calls for each NodeAccelRiser
+				s.NodeAccelRisers.discoverRemotePhase1()
+			}
+		}
+
+		//
+		// Get Chassis NetworkAdapter (HSN NIC) info if it exists
+		//
+		if nodeChassis.ChassisRF.NetworkAdapters.Oid == "" {
+			//errlog.Printf("%s: No assembly obj found.\n", topURL)
+			s.NetworkAdapters.Num = 0
+			s.NetworkAdapters.OIDs = make(map[string]*EpNetworkAdapter)
+		} else {
+			path = nodeChassis.ChassisRF.NetworkAdapters.Oid
+			url = nodeChassis.epRF.FQDN + path
+			naJSON, err := s.epRF.GETRelative(path)
+			if err != nil || naJSON == nil {
+				s.LastStatus = HTTPsGetFailed
+				return
+			}
+			if rfDebug > 0 {
+				errlog.Printf("%s: %s\n", url, naJSON)
+			}
+			s.LastStatus = HTTPsGetOk
+
+			var naInfo NetworkAdapterCollection
+			if err := json.Unmarshal(naJSON, &naInfo); err != nil {
+				errlog.Printf("Failed to decode %s: %s\n", url, err)
+				s.LastStatus = EPResponseFailedDecode
+			}
+
+			s.NetworkAdapters.Num = len(naInfo.Members)
+			s.NetworkAdapters.OIDs = make(map[string]*EpNetworkAdapter)
+
+			sort.Sort(ResourceIDSlice(naInfo.Members))
+			for i, naoid := range naInfo.Members {
+				naid := naoid.Basename()
+				s.NetworkAdapters.OIDs[naid] = NewEpNetworkAdapter(s, s.OdataID, s.RedfishType, naoid, i)
+			}
+			s.NetworkAdapters.discoverRemotePhase1()
+		}
 	}
 
 	//
@@ -1193,9 +1301,12 @@ func (s *EpSystem) discoverRemotePhase1() {
 		s.Processors.OIDs = make(map[string]*EpProcessor)
 
 		sort.Sort(ResourceIDSlice(procInfo.Members))
-		for i, pOID := range procInfo.Members {
+		for procOrd, pOID := range procInfo.Members {
 			pID := pOID.Basename()
-			s.Processors.OIDs[pID] = NewEpProcessor(s, pOID, i)
+			// Both CPUs and GPUs show up under /redfish/v1/Systems/{systemID}/Processors
+			// Need to update ordinal value of each processor based on value of its ProcessorType field (CPU or GPU)
+			// in EpProcessor.discoverPhase2
+			s.Processors.OIDs[pID] = NewEpProcessor(s, pOID, procOrd)
 		}
 		s.Processors.discoverRemotePhase1()
 	}
@@ -1393,6 +1504,14 @@ func (s *EpSystem) discoverLocalPhase2() {
 		fmt.Printf("s.Drives.discoverLocalPhase2(): returned err %v", err)
 		childStatus = ChildVerificationFailed
 	}
+	if err := s.NodeAccelRisers.discoverLocalPhase2(); err != nil {
+		fmt.Printf("s.NodeAccelRisers.discoverLocalPhase2(): returned err %v", err)
+		childStatus = ChildVerificationFailed
+	}
+	if err := s.NetworkAdapters.discoverLocalPhase2(); err != nil {
+		fmt.Printf("s.NetworkAdapters.discoverLocalPhase2(): returned err %v", err)
+		childStatus = ChildVerificationFailed
+	}
 
 	s.LastStatus = childStatus
 }
@@ -1549,7 +1668,7 @@ func (s *EpSystem) discoverComponentState() {
 		} else if s.SystemRF.Status.Health == "Critical" {
 			s.Flag = base.FlagAlert.String()
 		}
-		generatedFRUID, err := s.epRF.getSystemFRUID(s)
+		generatedFRUID, err := GetSystemFRUID(s)
 		if err != nil {
 			errlog.Printf("FRUID Error: %s\n", err.Error())
 			errlog.Printf("Using untrackable FRUID: %s\n", generatedFRUID)
@@ -1822,8 +1941,14 @@ func (p *EpProcessor) discoverLocalPhase2() {
 		return
 	}
 
+	// CPUs and GPUs are both under processors
 	p.Ordinal = p.epRF.getProcessorOrdinal(p)
-	p.ID = p.sysRF.ID + "p" + strconv.Itoa(p.Ordinal)
+	if strings.ToLower(p.RedfishSubtype) == "gpu" {
+		p.ID = p.sysRF.ID + "a" + strconv.Itoa(p.Ordinal)
+		p.Type = base.NodeAccel.String()
+	} else {
+		p.ID = p.sysRF.ID + "p" + strconv.Itoa(p.Ordinal)
+	}
 	if p.ProcessorRF.Status.State != "Absent" {
 		p.Status = "Populated"
 		p.State = base.StatePopulated.String()
@@ -1838,7 +1963,7 @@ func (p *EpProcessor) discoverLocalPhase2() {
 				}
 			}
 		}
-		generatedFRUID, err := p.epRF.getProcessorFRUID(p)
+		generatedFRUID, err := GetProcessorFRUID(p)
 		if err != nil {
 			errlog.Printf("FRUID Error: %s\n", err.Error())
 			errlog.Printf("Using untrackable FRUID: %s\n", generatedFRUID)
@@ -1851,13 +1976,17 @@ func (p *EpProcessor) discoverLocalPhase2() {
 		p.Flag = base.FlagOK.String()
 	}
 	// Check if we have something valid to insert into the data store
-	if base.GetHMSType(p.ID) != base.Processor ||
-		p.Type != base.Processor.String() {
+	if (base.GetHMSType(p.ID) != base.Processor ||
+		p.Type != base.Processor.String()) &&
+		(base.GetHMSType(p.ID) != base.NodeAccel ||
+			p.Type != base.NodeAccel.String()) {
 		errlog.Printf("Error: Bad xname ID ('%s') or Type ('%s') for: %s\n",
 			p.ID, p.Type, p.ProcessorURL)
 		p.LastStatus = VerificationFailed
 		return
 	}
+
+	errlog.Printf("Processor xname ID ('%s') and Type ('%s') for: %s\n", p.ID, p.Type, p.ProcessorURL)
 	p.LastStatus = DiscoverOK
 }
 
@@ -2019,7 +2148,7 @@ func (m *EpMemory) discoverLocalPhase2() {
 		m.Status = "Populated"
 		m.State = base.StatePopulated.String()
 		m.Flag = base.FlagOK.String()
-		generatedFRUID, err := m.epRF.getMemoryFRUID(m)
+		generatedFRUID, err := GetMemoryFRUID(m)
 		if err != nil {
 			errlog.Printf("FRUID Error: %s\n", err.Error())
 			errlog.Printf("Using untrackable FRUID: %s\n", generatedFRUID)

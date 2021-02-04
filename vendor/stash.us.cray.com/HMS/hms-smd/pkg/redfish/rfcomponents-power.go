@@ -1,12 +1,34 @@
-// Copyright (c) 2019 Cray Inc. All Rights Reserved.
+// MIT License
+//
+// (C) Copyright [2019-2021] Hewlett Packard Enterprise Development LP
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the "Software"),
+// to deal in the Software without restriction, including without limitation
+// the rights to use, copy, modify, merge, publish, distribute, sublicense,
+// and/or sell copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+// THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+// OTHER DEALINGS IN THE SOFTWARE.
+
 package rf
 
 import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	base "stash.us.cray.com/HMS/hms-base"
 	"strconv"
+
+	base "stash.us.cray.com/HMS/hms-base"
 	//"strings"
 )
 
@@ -265,7 +287,7 @@ func (pdu *EpPDU) discoverComponentState() {
 		} else if pdu.PowerDistributionRF.Status.Health == "Critical" {
 			pdu.Flag = base.FlagAlert.String()
 		}
-		generatedFRUID, err := pdu.epRF.getPDUFRUID(pdu)
+		generatedFRUID, err := GetPDUFRUID(pdu)
 		if err != nil {
 			errlog.Printf("FRUID Error: %s\n", err.Error())
 			errlog.Printf("Using untrackable FRUID: %s\n", generatedFRUID)
@@ -520,10 +542,10 @@ func (ep *RedfishEP) getPDUHMSID(pdu *EpPDU, hmsType string, ordinal int) string
 	return ""
 }
 
-// Get the HMS type of the Outlet
+// Get the HMS type of the Cabinet PDU
 func (ep *RedfishEP) getPDUHMSType(pdu *EpPDU, ordinal int) string {
-	// Just one?  That's this endpoint's type.
-	if ep.Type == base.CabinetPDUController.String() && ordinal == 0 {
+	// There can 1 or more Cabinet PDUs under a Cabinet PDU controller
+	if ep.Type == base.CabinetPDUController.String() && ordinal >= 0 {
 		return base.CabinetPDU.String()
 	}
 	// Shouldn't happen
@@ -533,7 +555,7 @@ func (ep *RedfishEP) getPDUHMSType(pdu *EpPDU, ordinal int) string {
 // Determines based on discovered info and original list order what the
 // Manager ordinal is, i.e. the b[0-n] in the xname.
 func (ep *RedfishEP) getPDUOrdinal(pdu *EpPDU) int {
-	if pdu.RawOrdinal != 0 {
+	if pdu.RawOrdinal < 0 {
 		return -1
 	}
 	return pdu.RawOrdinal
@@ -563,6 +585,12 @@ func (ep *RedfishEP) getOutletHMSID(out *EpOutlet, hmsType string, ordinal int) 
 		// consistency in hwinv so ordinal 0 => xXmMpPj1
 		return out.epPDU.ID + "j" + strconv.Itoa(ordinal+1)
 	}
+	if hmsType == base.CabinetPDUPowerConnector.String() {
+		// Do not start at zero for the jJ portion of the xname,
+		// start at one.  We keep the ordinal at the original value for
+		// consistency in hwinv so ordinal 0 => xXmMpPj1
+		return out.epPDU.ID + "v" + strconv.Itoa(ordinal+1)
+	}
 	// Something went wrong
 	return ""
 }
@@ -571,7 +599,7 @@ func (ep *RedfishEP) getOutletHMSID(out *EpOutlet, hmsType string, ordinal int) 
 func (ep *RedfishEP) getOutletHMSType(out *EpOutlet) string {
 	// Just one?  That's this endpoint's type.
 	if out.epPDU.Type == base.CabinetPDU.String() {
-		return base.CabinetPDUOutlet.String()
+		return base.CabinetPDUPowerConnector.String()
 	}
 	// Shouldn't happen
 	return base.HMSTypeInvalid.String()
@@ -820,7 +848,7 @@ func (p *EpPowerSupply) discoverLocalPhase2() {
 		p.Status = "Populated"
 		p.State = base.StatePopulated.String()
 		p.Flag = base.FlagOK.String()
-		generatedFRUID, err := p.epRF.getPowerSupplyFRUID(p)
+		generatedFRUID, err := GetPowerSupplyFRUID(p)
 		if err != nil {
 			errlog.Printf("FRUID Error: %s\n", err.Error())
 			errlog.Printf("Using untrackable FRUID: %s\n", generatedFRUID)
@@ -834,8 +862,10 @@ func (p *EpPowerSupply) discoverLocalPhase2() {
 	}
 	// Check if we have something valid to insert into the data store
 	if ((base.GetHMSType(p.ID) == base.CMMRectifier) || (base.GetHMSType(p.ID) == base.NodeEnclosurePowerSupply)) && (p.Type == base.CMMRectifier.String() || p.Type == base.NodeEnclosurePowerSupply.String()) {
-		errlog.Printf("PowerSupply discoverLocalPhase2: VALID xname ID ('%s') and Type ('%s') for: %s\n",
-			p.ID, p.Type, p.PowerSupplyURL)
+		if rfVerbose > 0 {
+			errlog.Printf("PowerSupply discoverLocalPhase2: VALID xname ID ('%s') and Type ('%s') for: %s\n",
+				p.ID, p.Type, p.PowerSupplyURL)
+		}
 	} else {
 		errlog.Printf("Error: Bad xname ID ('%s') or Type ('%s') for: %s\n",
 			p.ID, p.Type, p.PowerSupplyURL)
