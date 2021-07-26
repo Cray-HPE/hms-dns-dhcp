@@ -1,9 +1,9 @@
-module stash.us.cray.com/HMS/hms-dns-dhcp
+module github.com/Cray-HPE/hms-dns-dhcp
 
 go 1.16
 
 require (
-	github.com/hashicorp/go-retryablehttp v0.6.7
-	stash.us.cray.com/HMS/hms-base v1.12.0
-	stash.us.cray.com/HMS/hms-smd v1.28.0
+	github.com/Cray-HPE/hms-base v1.15.0
+	github.com/Cray-HPE/hms-smd v1.30.9
+	github.com/hashicorp/go-retryablehttp v0.7.0
 )

@@ -30,7 +30,7 @@ import (
 	"os"
 	"encoding/json"
 	"io/ioutil"
-	"stash.us.cray.com/HMS/hms-smd/pkg/sm"
+	"github.com/Cray-HPE/hms-smd/pkg/sm"
 )
 
 var expSvcName = "DNSHelper"
