@@ -24,10 +24,10 @@
 # for other images to do testing, coverage, and building.
 
 
-# Dockerfile for running testing coverage on HMS BMC network protocol pkg.
+# Dockerfile for running testing coverage on Cray-HPE BMC network protocol pkg.
 
 FROM cray/hms-dns-dhcp-build-base
 
 # Run coverage.
 RUN set -ex \
-    && go test -cover -v stash.us.cray.com/HMS/hms-dns-dhcp/.
+    && go test -cover -v github.com/Cray-HPE/hms-dns-dhcp/.

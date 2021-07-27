@@ -20,7 +20,7 @@
 # ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 # OTHER DEALINGS IN THE SOFTWARE.
 
-# Dockerfile for building HMS DNS/DHCP code. Note that this
+# Dockerfile for building Cray-HPE DNS/DHCP code. Note that this
 # image can't be run as these are just packages in this repo.
 
 # Build base just has the packages installed we need.
@@ -35,11 +35,11 @@ FROM build-base AS base
 
 RUN go env -w GO111MODULE=auto
 
-COPY pkg $GOPATH/src/stash.us.cray.com/HMS/hms-dns-dhcp/pkg
-COPY vendor $GOPATH/src/stash.us.cray.com/HMS/hms-dns-dhcp/vendor
+COPY pkg $GOPATH/src/github.com/Cray-HPE/hms-dns-dhcp/pkg
+COPY vendor $GOPATH/src/github.com/Cray-HPE/hms-dns-dhcp/vendor
 
 # Now we can build.
 FROM base
 
 RUN set -ex \
-    && go build -v stash.us.cray.com/HMS/hms-dns-dhcp/pkg/.
+    && go build -v github.com/Cray-HPE/hms-dns-dhcp/pkg/.
