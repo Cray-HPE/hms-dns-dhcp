@@ -20,7 +20,7 @@
 # ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 # OTHER DEALINGS IN THE SOFTWARE.
 
-NAME ?= hms-dns-dhcp 
+NAME ?= hms-dns-dhcp
 VERSION ?= $(shell cat .version)
 DOCKER_IMAGE ?= ${NAME}:${VERSION}
 
@@ -30,4 +30,4 @@ unittest:
 	./runUnitTest.sh
 
 coverage:
-	./runCoverage.sh	
+	./runCoverage.sh
