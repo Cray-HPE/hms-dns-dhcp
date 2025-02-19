@@ -33,7 +33,7 @@ import (
 
 	"github.com/hashicorp/go-retryablehttp"
 	"github.com/Cray-HPE/hms-base/v2"
-	"github.com/Cray-HPE/hms-smd/pkg/sm"
+	"github.com/Cray-HPE/hms-smd/v2/pkg/sm"
 )
 
 type DNSDHCPHelper struct {
